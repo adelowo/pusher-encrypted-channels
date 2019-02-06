@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -39,14 +40,17 @@ func main() {
 	}
 
 	client := &pusher.Client{
-		AppId:   appID,
-		Key:     appKey,
-		Secret:  appSecret,
-		Cluster: appCluster,
-		Secure:  isSecure,
+		AppId:               appID,
+		Key:                 appKey,
+		Secret:              appSecret,
+		Cluster:             appCluster,
+		Secure:              isSecure,
+		EncryptionMasterKey: os.Getenv("PUSHER_CHANNELS_ENCRYPTION_KEY"),
+		HttpClient: &http.Client{
+			Timeout: time.Minute * 2,
+		},
 	}
 
-	_, _ = client, port
 	mux := http.NewServeMux()
 
 	f := &feed{
@@ -55,6 +59,7 @@ func main() {
 	}
 
 	mux.Handle("/feed", createFeedTitle(client, f))
+	mux.Handle("/pusher/auth", authenticateUsers(client))
 
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", *port), mux))
 }
@@ -153,7 +158,7 @@ func createFeedTitle(client *pusher.Client, f *feed) http.HandlerFunc {
 		}
 
 		if err := f.Add(request.Title, request.Content); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
+			w.WriteHeader(http.StatusAlreadyReported)
 			writer.Encode(&respose{
 				Message:   err.Error(),
 				Status:    errorMsg,
@@ -162,11 +167,58 @@ func createFeedTitle(client *pusher.Client, f *feed) http.HandlerFunc {
 			return
 		}
 
+		go func() {
+
+			_, err := client.Trigger("private-encrypted-feeds", "items", map[string]string{
+				"title":     request.Title,
+				"content":   request.Content,
+				"createdAt": time.Now().String(),
+			})
+
+			if err != nil {
+				fmt.Println(err)
+			}
+
+		}()
+
 		w.WriteHeader(http.StatusOK)
 		writer.Encode(&respose{
 			Message:   "Feed item was successfully added",
 			Status:    errorMsg,
 			Timestamp: time.Now().Unix(),
 		})
+	}
+}
+
+func authenticateUsers(client *pusher.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+		w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+
+		if r.Method == http.MethodOptions {
+			return
+		}
+
+		params, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		presenceData := pusher.MemberData{
+			UserId: "10",
+			UserInfo: map[string]string{
+				"random": "random",
+			},
+		}
+
+		response, err := client.AuthenticatePresenceChannel(params, presenceData)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		w.Write(response)
 	}
 }
