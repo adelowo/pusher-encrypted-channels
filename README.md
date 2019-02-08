@@ -1,6 +1,7 @@
 # pusher-encrypted-channels
 
 An introduction to end to end encryption in encrypted channels with Pusher Channels.
+The tutorial can be found at https://pusher.com/tutorials/encryption-go-channels
 
 
 #### Getting started
