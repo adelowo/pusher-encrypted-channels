@@ -61,6 +61,7 @@ func main() {
 	mux.Handle("/feed", createFeedTitle(client, f))
 	mux.Handle("/pusher/auth", authenticateUsers(client))
 
+	log.Println("Starting HTTP server")
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", *port), mux))
 }
 
